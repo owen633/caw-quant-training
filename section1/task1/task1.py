@@ -1,39 +1,60 @@
 # Task1 Get hourly candle data from CryptoCompare
-
-[CryptoCompare](https://www.cryptocompare.com/) is a free cryptocurrency data source, where you can download market data, social media, news about cryptocurrencies. This task requires you to download data from CryptoCompare and do basic formatting.
-
 ## 1. Explore CryptoCompare Data API
-
-[CryptoCompare Homepage](https://min-api.cryptocompare.com/)
-
-[CryptoCompare Data API Documentation](https://min-api.cryptocompare.com/documentation)
-
 ### Required
-
 #### 1. **Write a function** to download histohour data, parameters:
+# fsym: BTC, tsym: USDT, start_time="2017-04-01", end_time="2020-04-01", e='binance'
 
-fsym: BTC, tsym: USDT, start_time="2017-04-01", end_time="2020-04-01", e='binance'
+# import libraries
+import requests
+import pandas as pd
 
-Hint:
+# write a function to extract API data
+def get_hour(fsym, tsym, e):
+    end_time = 1585699200
+    global df1
+    global df3
+    df1 = pd.DataFrame()
+    for i in range(13):
+        dat_param1 = {'fsym': fsym , 'tsym': tsym, 'limit': 2000, 'toTs': end_time, 'e': e}
+        resp1 = requests.get('https://min-api.cryptocompare.com/data/v2/histohour', params = dat_param1)
+        df2 = pd.DataFrame.from_dict(resp1.json()['Data']['Data'])
+        df1 = df1.append(df2, ignore_index=True)
+        end_time = end_time - 7200000
+    
+    dat_param2 = {'fsym': fsym, 'tsym': tsym, 'limit': 304, 'toTs': end_time, 'e': e}
+    resp2 = requests.get('https://min-api.cryptocompare.com/data/v2/histohour', params = dat_param2)
+    df3 = pd.DataFrame.from_dict(resp2.json()['Data']['Data'])
 
-1. check this url: https://min-api.cryptocompare.com/documentation?key=Historical&cat=dataHistohour
+# call function to download data
+get_hour('BTC', 'USDT', 'binance')
 
-2. Learn how to do http request by python's [request](https://requests.readthedocs.io/en/master/user/quickstart/) library
+# format data using pandas
+comb_df = pd.concat([df1, df3])
+comb_df.sort_values(by=['time'], inplace=True)
+final_df = comb_df.drop_duplicates(subset='time', keep='first', inplace=True)
+final_df = comb_df.drop(['conversionType', 'conversionSymbol'], axis=1)
+final_df.rename(
+    columns={
+        "volumefrom": "volume",
+        "volumeto": "baseVolume",
+        "time": "datetime"
+    },
+    inplace=True
+)
 
-3. Formatting downloaded data by [pandas](https://pandas.pydata.org/pandas-docs/stable/index.html), desired output example [BTC-USDT-1h.csv](./BTC_USDT_1h.csv)
+final_df['datetime'] = pd.to_datetime(final_df['datetime'], unit='s')
 
-4. You don't need api key for the two endpoints(get histohour data, get market cap toplist) in this task.
+# export data to csv file
+final_df.to_csv('D:\quant_intern\histohour.csv', index=False)
 
-5. volumefrom: The total amount of the symbol currency traded into the quote currency during this period of time (in unit of the symbol currency).
 
-6. volumeto: The total amount of the base currency traded into the quote currency during this period of time (in unit of the base currency).
+
+
 
 ### Optional
 
 #### 1. Modularize your code
 
-**write a class** for CryptoCompare data api object and put your function into a member function.
 
 #### 2. Add one more data endpoint
 
-**write a member function** for one more endpoint, e.x. [Toplist by Market Cap Full Data](https://min-api.cryptocompare.com/documentation?key=Toplists&cat=TopTotalMktCapEndpointFull). (feel free to choose another one) and put it as another member function.
