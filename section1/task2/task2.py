@@ -117,7 +117,7 @@ df = df.drop(['Ignore'], axis=1)
 df['Open time'] = pd.to_datetime(df['Open time'], unit='ms')
 df['Close time'] = pd.to_datetime(df['Close time'], unit='ms')
 
-df.to_csv('D:\quant_intern\kline.csv', index=False)
+df.to_csv(r'D:\quant_intern\caw-quant-training\section1\task2\kline.csv', index=False)
 
 
 ### Optional, 
