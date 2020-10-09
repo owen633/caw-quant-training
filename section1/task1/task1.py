@@ -7,45 +7,66 @@
 # import libraries
 import requests
 import pandas as pd
+import time
+import dateparser
+import pytz
+
+from datetime import datetime
+
+
+# write a function to convert time
+def date_to_seconds(date_str):
+    epoch = datetime.utcfromtimestamp(0).replace(tzinfo=pytz.utc)
+    d = dateparser.parse(date_str)
+    if d.tzinfo is None or d.tzinfo.utcoffset(d) is None:
+        d = d.replace(tzinfo=pytz.utc)
+    return int((d - epoch).total_seconds())
 
 # write a function to extract API data
-def get_hour(fsym, tsym, e):
-    end_time = 1585699200
-    global df1
-    global df3
-    df1 = pd.DataFrame()
-    for i in range(13):
-        dat_param1 = {'fsym': fsym , 'tsym': tsym, 'limit': 2000, 'toTs': end_time, 'e': e}
-        resp1 = requests.get('https://min-api.cryptocompare.com/data/v2/histohour', params = dat_param1)
-        df2 = pd.DataFrame.from_dict(resp1.json()['Data']['Data'])
-        df1 = df1.append(df2, ignore_index=True)
-        end_time = end_time - 7200000
+def get_hour(fsym, tsym, e, start_time, end_time):
+    output_data = pd.DataFrame()
+    limit = 2000
+    start_ts = date_to_seconds(start_time)
+    end_ts = date_to_seconds(end_time)
+    df_rows = (end_ts - start_ts)/3600 + 1
+
+    while len(output_data) < df_rows:
+        dat_param = {'fsym': fsym , 'tsym': tsym, 'limit':limit, 'e': e, 'toTs': end_ts}
+        resp = requests.get('https://min-api.cryptocompare.com/data/v2/histohour', params = dat_param)
+        temp_data = pd.DataFrame.from_dict(resp.json()['Data']['Data'])
+        output_data = output_data.append(temp_data, ignore_index=True)
+        end_ts = temp_data['time'].iloc[0] - 3600
+        hour_remain = (end_ts - start_ts)/3600
+
+        if hour_remain < limit:
+            dat_param2 = {'fsym': fsym , 'tsym': tsym, 'limit':hour_remain, 'e': e, 'toTs': end_ts}
+            resp2 = requests.get('https://min-api.cryptocompare.com/data/v2/histohour', params = dat_param2)
+            final_data = pd.DataFrame.from_dict(resp2.json()['Data']['Data'])
+            output_data = output_data.append(final_data, ignore_index=True)
+            break
+
+    return output_data
     
-    dat_param2 = {'fsym': fsym, 'tsym': tsym, 'limit': 304, 'toTs': end_time, 'e': e}
-    resp2 = requests.get('https://min-api.cryptocompare.com/data/v2/histohour', params = dat_param2)
-    df3 = pd.DataFrame.from_dict(resp2.json()['Data']['Data'])
-
-# call function to download data
-get_hour('BTC', 'USDT', 'binance')
-
-# format data using pandas
-comb_df = pd.concat([df1, df3])
-comb_df.sort_values(by=['time'], inplace=True)
-final_df = comb_df.drop_duplicates(subset='time', keep='first', inplace=True)
-final_df = comb_df.drop(['conversionType', 'conversionSymbol'], axis=1)
-final_df.rename(
+# write a function to format data
+def format_data(df):
+    tidy_df = df.sort_values(by=['time'], inplace=False).rename(
     columns={
         "volumefrom": "volume",
         "volumeto": "baseVolume",
         "time": "datetime"
-    },
-    inplace=True
-)
+        }, inplace=False
+    ).drop(['conversionType', 'conversionSymbol'], axis=1, inplace=False)
+    
+    tidy_df['datetime'] = pd.to_datetime(tidy_df['datetime'], unit='s')
 
-final_df['datetime'] = pd.to_datetime(final_df['datetime'], unit='s')
+    return tidy_df
 
-# export data to csv file
-final_df.to_csv(r'D:\quant_intern\caw-quant-training\section1\task1\histohour.csv', index=False)
+# execute module code and export to csv file
+if __name__ == '__main__':
+    raw_data = get_hour('BTC', 'USDT', 'binance', '2017-04-01', '2020-04-01')
+    formatted_data = format_data(raw_data)
+    formatted_data.to_csv('.\histohour.csv', index=False)
+
 
 
 
