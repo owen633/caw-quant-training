@@ -3,6 +3,8 @@
 ### Required
 
 #### 1. **Use Binance Python SDK** to get public data
+
+# import libraries
 import time
 import dateparser
 import pytz
@@ -12,16 +14,13 @@ import pandas as pd
 from datetime import datetime
 from binance.client import Client
 
+# write functions to convert time and inverval
 def date_to_milliseconds(date_str):
-    # get epoch value in UTC
     epoch = datetime.utcfromtimestamp(0).replace(tzinfo=pytz.utc)
-    # parse our date string
     d = dateparser.parse(date_str)
-    # if the date is not timezone aware apply UTC timezone
     if d.tzinfo is None or d.tzinfo.utcoffset(d) is None:
         d = d.replace(tzinfo=pytz.utc)
 
-    # return the difference in time
     return int((d - epoch).total_seconds() * 1000.0)
 
 def interval_to_milliseconds(interval):
@@ -41,33 +40,22 @@ def interval_to_milliseconds(interval):
             pass
     return ms
 
+# write function to get candle/klines data
 def get_historical_klines(symbol, interval, start_str, end_str=None):
-   
-    # create the Binance client, no need for api key
     client = Client("", "")
-
-    # init our list
     output_data = []
-
-    # setup the max limit
     limit = 500
-
-    # convert interval to useful value in seconds
     timeframe = interval_to_milliseconds(interval)
-
-    # convert our date strings to milliseconds
     start_ts = date_to_milliseconds(start_str)
-
-    # if an end time was passed convert it
     end_ts = None
+    
     if end_str:
         end_ts = date_to_milliseconds(end_str)
 
     idx = 0
-    # it can be difficult to know when a symbol was listed on Binance so allow start time to be before list date
     symbol_existed = False
+    
     while True:
-        # fetch the klines from start_ts up to max 500 entries or the end_ts if set
         temp_data = client.get_klines(
             symbol=symbol,
             interval=interval,
@@ -76,48 +64,154 @@ def get_historical_klines(symbol, interval, start_str, end_str=None):
             endTime=end_ts
         )
 
-        # handle the case where our start date is before the symbol pair listed on Binance
         if not symbol_existed and len(temp_data):
             symbol_existed = True
 
         if symbol_existed:
-            # append this loops data to our output data
-            output_data += temp_data
-
-            # update our start timestamp using the last value in the array and add the interval timeframe
+            output_data = output_data + temp_data
             start_ts = temp_data[len(temp_data) - 1][0] + timeframe
+        
         else:
-            # it wasn't listed yet, increment our start date
-            start_ts += timeframe
+            start_ts = start_ts + timeframe
 
-        idx += 1
-        # check if we received less than the required limit and exit the loop
+        idx = idx + 1
+       
         if len(temp_data) < limit:
-            # exit the while loop
+            
             break
 
-        # sleep after every 3rd call to be kind to the API
         if idx % 3 == 0:
             time.sleep(1)
 
     return output_data
 
-symbol = "BNBBTC"
-start = "2018-04-01"
-end = "2020-04-01"
-interval = Client.KLINE_INTERVAL_1HOUR
+# write function to format candle/klines data
+def format_klines(df):
+    formatted_klines = pd.DataFrame(df, columns=['Open time', 'Open', 'High', 'Low', 'Close', 'Volume',
+                                                'Close time', 'Quote asset volume', 'Number of trades', 'Taker buy base asset volume', 
+                                                'Taker buy quote asset volume', 'Ignore'], index=None)
 
-klines = get_historical_klines(symbol, interval, start, end)
+    formatted_klines = formatted_klines.drop(['Ignore'], axis=1)
+    formatted_klines['Open time'] = pd.to_datetime(formatted_klines['Open time'], unit='ms')
+    formatted_klines['Close time'] = pd.to_datetime(formatted_klines['Close time'], unit='ms')
 
-df = pd.DataFrame(klines, columns=['Open time', 'Open', 'High', 'Low', 'Close', 'Volume',
-'Close time', 'Quote asset volume', 'Number of trades', 'Taker buy base asset volume', 
-'Taker buy quote asset volume', 'Ignore'], index=None)
+    return formatted_klines
 
-df = df.drop(['Ignore'], axis=1)
-df['Open time'] = pd.to_datetime(df['Open time'], unit='ms')
-df['Close time'] = pd.to_datetime(df['Close time'], unit='ms')
 
-df.to_csv(r'D:\quant_intern\caw-quant-training\section1\task2\kline.csv', index=False)
+# write function to get transaction/trade data
+def get_aggr_trades(symbol, start_str, end_str, fromID = None):
+    client = Client("", "")
+    output_data = []
+    limit = 500
+    start_ts = date_to_milliseconds(start_str)
+    end_ts = date_to_milliseconds(end_str)
+
+    from_id = None
+    
+    if fromID:
+        from_id = fromID
+    
+    idx = 0
+    symbol_existed = False
+    
+    while True:
+        temp_data = client.get_aggregate_trades(
+        symbol=symbol,
+        fromId = from_id,
+        limit=limit,
+        startTime=start_ts,
+        endTime=end_ts
+        )
+        
+        if not symbol_existed and len(temp_data):
+            symbol_existed = True
+
+        if symbol_existed:
+            output_data += temp_data
+            from_id = str(int(temp_data[-1]['a'] + 1))
+            start_ts = None
+            end_ts = None
+
+        idx += 1
+        
+        if temp_data[-1]['T'] >  date_to_milliseconds(end_str):
+            temp_data = [i for i in temp_data if not (i['T'] > date_to_milliseconds(end_str))]
+            output_data += temp_data
+          
+            break
+
+        if idx % 3 == 0:
+            time.sleep(1)
+    
+    return output_data
+
+
+
+# write function to format transaction/trade data
+def format_trades(df):
+    formatted_trades = pd.DataFrame.from_dict(df)
+    formatted_trades.rename(
+    columns={
+        "a": "Aggregate tradeId",
+        "p": "Price",
+        "q": "Quantity",
+        "f": "First tradeId",
+        "l": "Last tradeId",
+        "T": "Timestamp",
+        "m": "Was the buyer the maker?",
+        "M": "Was the trade the best price match?"
+
+    },
+    inplace=True
+)
+
+    formatted_trades['Timestamp'] = pd.to_datetime(formatted_trades['Timestamp'], unit='ms')
+
+    return formatted_trades
+
+
+# write function to get market depth/orderbook data
+def get_orderbook(symbol):
+    client = Client("", "")
+    limit = 1000
+
+    output_data = client.get_order_book(
+        symbol=symbol,
+        limit=limit,
+        )
+
+    return output_data
+
+
+# write function to format orderbook data
+def format_orderbook(df):
+    formatted_order = pd.DataFrame.from_dict(df)
+    bid = pd.DataFrame(formatted_order['bids'].to_list(), columns=
+['Bid Price', 'Bid Quantity'])
+    ask = pd.DataFrame(formatted_order['asks'].to_list(), columns=
+['Ask Price', 'Ask Quantity'])
+    join_order = pd.concat([bid, ask], axis=1)
+
+    return join_order
+
+
+# execute module code and export to csv file
+if __name__ == '__main__':
+    raw_data1 = get_historical_klines('BNBBTC', Client.KLINE_INTERVAL_1HOUR, '2019-01-01', '2020-01-01')
+    formatted_data1 = format_klines(raw_data1)
+    formatted_data1.to_csv('./klines.csv', index=False)
+
+
+    raw_data2 = get_aggr_trades("ETHBTC", "10 hours ago", "9 hours and 10 minutes ago")
+    formatted_data2 = format_trades(raw_data2)
+    formatted_data2.to_csv('./trades.csv', index=False)
+
+    raw_data3 = get_orderbook("BNBBTC")
+    formatted_data3 = format_orderbook(raw_data3)
+    formatted_data3.to_csv('./orderbook.csv', index=False)
+
+    
+
 
 
 ### Optional, 
